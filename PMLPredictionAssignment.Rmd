@@ -1,0 +1,196 @@
+---
+title: "Quantify activity quality from activity monitors"
+author: "You!"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data Source
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+## Data Description
+
+The outcome variable is `classe`, a factor variable with 5 levels. For this data set, participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in 5 different fashions:
+
+- exactly according to the specification (Class A)
+- throwing the elbows to the front (Class B)
+- lifting the dumbbell only halfway (Class C)
+- lowering the dumbbell only halfway (Class D)
+- throwing the hips to the front (Class E)
+
+
+## Initial configuration
+
+The initial configuration consists of loading some required packages and initializing some variables.
+
+```{r}
+#Data variables
+training.file   <- 'pml-training.csv'
+test.cases.file <- 'pml-testing.csv'
+training.url    <- 
+        'http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+test.cases.url  <- 
+        'http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+
+#R-Packages
+IscaretInstalled <- require("caret")
+if(!IscaretInstalled){
+    install.packages("caret")
+    library("caret")
+    }
+IsrandomForestInstalled <- require("randomForest")
+if(!IsrandomForestInstalled){
+    install.packages("randomForest")
+    library("randomForest")
+    }
+IsRpartInstalled <- require("rpart")
+if(!IsRpartInstalled){
+    install.packages("rpart")
+    library("rpart")
+    }
+IsRpartPlotInstalled <- require("rpart.plot")
+if(!IsRpartPlotInstalled){
+    install.packages("rpart.plot")
+    library("rpart.plot")
+    }
+# Set seed for reproducability
+set.seed(1000)
+```
+
+
+## Data processing
+
+In this section the data is downloaded and processed. Some basic transformations and cleanup will be performed, so that `NA` values are omitted. Irrelevant columns such as `user_name`, `raw_timestamp_part_1`, `raw_timestamp_part_2`, `cvtd_timestamp`, `new_window`, and  `num_window` (columns 1 to 7) will be removed in the subset.
+
+The `pml-training.csv` data is used to devise training and testing sets.
+The `pml-test.csv` data is used to predict and answer the 20 questions based on the trained model.
+
+```{r}
+# Download data
+if(!file.exists(training.file)){
+        download.file(training.url, training.file)
+}
+
+if(!file.exists(test.cases.file)){
+        download.file(test.cases.url,test.cases.file )
+}
+
+# Load data
+#load variable training and testing respectively
+
+training <- read.csv(training.file, na.strings = c("NA","#DIV/0!", ""))
+testing <- read.csv(test.cases.file, na.strings = c("NA", "#DIV/0!", ""))
+
+# Clean data
+cleanColumnIndex <- colSums(is.na(training))/nrow(training) < 0.95
+training <- training[,cleanColumnIndex]
+
+#Verify
+#verify that NA are removed correctly
+
+colSums(is.na(training))/nrow(training)
+colSums(is.na(training))
+
+# Subset data
+training <- training[,-c(1:7)]
+testing <- testing[,-c(1:7)]
+```
+
+
+## Cross-validation
+
+In this section cross-validation will be performed by splitting the training data in training (75%) and testing (25%) data.
+
+```{r}
+subSamples <- createDataPartition(y=training$classe, p=0.75)[[1]]
+subTraining <- training[subSamples, ] 
+subTrainingCrossVal <- training[-subSamples, ]
+```
+
+## Test Data Processing
+
+Now change the test data set into the same
+
+```{r}
+allNames <- names(training)
+testing <- testing[,allNames[1:52]]
+```
+
+
+## Expected out-of-sample error
+
+The expected out-of-sample error in this project will correspond to [1 - (the accuracy in the cross-validation data)]. Accuracy is the proportion of correctly classified observation over the total sample in the subTesting data set.
+Expected accuracy is the expected accuracy in the out-of-sample data set (i.e. original testing data set). Thus, the expected value of the out-of-sample error will correspond to the expected number of miss classified observations/total observations in the Test data set, which is [1 - (the accuracy found from the cross-validation data set)].
+
+
+
+## Prediction models
+In this section a decision tree and random forest will be applied to the data.
+
+### Decision Tree
+
+```{r}
+fitDecisionTree <- train(classe ~ ., method = 'rpart', data = subTraining)
+```
+
+Predict with decision tree and output the confusion matrix. It seems like the result of the model is not ideal.
+
+```{r}
+predDecisionTree <- predict(fitDecisionTree, subTrainingCrossVal)
+confusionMatrix(as.factor(subTrainingCrossVal$classe), predDecisionTree)
+```
+
+Plot the decision tree
+
+```{r}
+rpart.plot(fitDecisionTree$finalModel)
+```
+
+### Random Forest
+
+```{r}
+subTraining$classe <- as.factor(subTraining$classe)
+```
+
+Develop training model
+
+```{r}
+#fitRandomForest <- train(classe ~ ., method = 'rf', data = subTraining, trControl = fitControl)
+fitRandomForest <- randomForest(classe ~ ., data=subTraining, method="class")
+predRandomForest <- predict(fitRandomForest, subTrainingCrossVal)
+confusionMatrix(predRandomForest, as.factor(subTrainingCrossVal$classe))
+```
+
+## Prediction
+
+Now we use it to predict the test set
+
+```{r}
+predict(fitRandomForest, testing)
+```
+
+
+## Conclusion
+
+As we can see from the result, the random forest algorithem far outperforms the decision tree in terms of accuracy. We are getting 99.25% in sample accuracy, while the decision tree gives us only nearly 50% in sample accuracy
